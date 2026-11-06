@@ -36,6 +36,18 @@
   #info .big{font-size:26px;font-weight:800;color:var(--accent);line-height:1.2;margin-top:2px}
   #info .sub{font-size:13px;color:var(--text);margin-top:2px}
   #info .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  #info .hint.warn{color:#fbbf24}
+  #iAct{display:none;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+  #iAct.show{display:flex}
+  #iAct label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;flex:1 1 100%;white-space:nowrap}
+  #iAct input[type=range]{flex:1;accent-color:#a855f7}
+  #iAct button{background:#a855f7;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer}
+  #iAct button.ghost{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:400}
+  #info.auto .big{color:#c084fc}
+  .btn.on.auto{background:rgba(168,85,247,.2);color:#c084fc}
+  .pop b{font-size:15px}
+  .pop .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;color:#fff;margin-bottom:4px}
+  .pop button{margin-top:8px;background:#ef4444;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer}
 
   /* 下方工具列 */
   #bar{position:fixed;left:0;right:0;bottom:0;z-index:1000;background:var(--panel);
@@ -111,13 +123,20 @@
   <div class="big" id="iBig"></div>
   <div class="sub" id="iSub"></div>
   <div class="hint" id="iHint"></div>
+  <div id="iAct">
+    <label>容差 <input type="range" id="tol" min="4" max="60" step="1" value="16"><span id="tolV">16</span></label>
+    <button class="ghost" id="bAdd">＋ 加選</button>
+    <button class="ghost" id="bRect">▭ 方正化</button>
+    <button class="ghost" id="bAdopt">拉點微調</button>
+  </div>
 </div>
 
 <div id="bar">
   <button class="btn loc" id="bLoc"><span class="ic">📍</span>定位</button>
   <button class="btn" id="bDist"><span class="ic">📏</span>距離</button>
   <button class="btn" id="bArea"><span class="ic">⬠</span>面積</button>
-  <button class="btn" id="bHere" disabled><span class="ic">🚶</span>加我位置</button>
+  <button class="btn auto" id="bAuto"><span class="ic">🪄</span>自動</button>
+  <button class="btn" id="bHere" disabled><span class="ic">🚶</span>GPS點</button>
   <button class="btn" id="bUndo" disabled><span class="ic">↶</span>復原</button>
   <button class="btn" id="bDone" disabled><span class="ic">✔</span>完成</button>
   <button class="btn" id="bClear"><span class="ic">🗑</span>清除</button>
@@ -192,24 +211,29 @@
 
   // ---------- 量測狀態 ----------
   const done = L.layerGroup().addTo(map);   // 已完成的量測
-  let mode = null;            // 'dist' | 'area' | null
+  let mode = null;            // 'dist' | 'area' | 'auto' | null
   let pts = [];               // 目前量測的點
+  let adoptSrc = null;        // 由自動辨識轉來微調時 = 'auto'
   let live = L.layerGroup().addTo(map);
+  const COLORS = {dist:'#38bdf8', area:'#f59e0b', auto:'#a855f7'};
 
   const vIcon = L.divIcon({className:'', html:'<div class="vtx"></div>', iconSize:[14,14], iconAnchor:[7,7]});
 
-  function drawShape(group, points, kind, final){
-    const color = kind==='area' ? '#f59e0b' : '#38bdf8';
+  function drawShape(group, points, kind, final, src){
+    const color = src==='auto' ? COLORS.auto : COLORS[kind];
+    let shape = null;
     if(kind==='area' && points.length>=3){
-      L.polygon(points, {color, weight:3, fillColor:color, fillOpacity:.22}).addTo(group);
+      shape = L.polygon(points, {color, weight:3, fillColor:color, fillOpacity:.22, dashArray: final?null:(src==='auto'?'6 5':null)}).addTo(group);
     } else if(points.length>=2){
-      L.polyline(points, {color, weight:4}).addTo(group);
+      shape = L.polyline(points, {color, weight:4}).addTo(group);
     }
-    // 各段長度
+    // 各段長度（自動辨識點多時不標，點少時只標 ≥ 3 m 的邊，避免字擠成一團）
     const segs = kind==='area' && points.length>=3 ? points.length : points.length-1;
-    for(let i=0;i<segs;i++){
+    const skipSegs = src==='auto' && points.length > 10;
+    for(let i=0;i<segs && !skipSegs;i++){
       const a = points[i], b = points[(i+1)%points.length];
       const d = map.distance(a,b);
+      if(src==='auto' && d < 3) continue;
       L.tooltip({permanent:true, direction:'center', className:'seg-label'})
         .setLatLng(mid(a,b)).setContent(fmtLen(d)).addTo(group);
     }
@@ -217,12 +241,13 @@
       const A = geoArea(points);
       const c = L.polygon(points).getBounds().getCenter();
       L.tooltip({permanent:true, direction:'center', className:'seg-label area-label'})
-        .setLatLng(c).setContent(`${fmtNum(A)} m²<br>${fmtNum(A*0.3025)} 坪`).addTo(group);
+        .setLatLng(c).setContent(`${src==='auto'?'🪄 ':''}${fmtNum(A)} m²<br>${fmtNum(A*0.3025)} 坪`).addTo(group);
     }
     if(final && kind==='dist' && points.length>=2){
       L.tooltip({permanent:true, direction:'right', offset:[10,0], className:'seg-label area-label'})
         .setLatLng(points[points.length-1]).setContent('總長 '+fmtLen(total(points))).addTo(group);
     }
+    return shape;
   }
   function total(points, closed){
     let s=0; for(let i=1;i<points.length;i++) s+=map.distance(points[i-1],points[i]);
@@ -232,7 +257,7 @@
 
   function redraw(){
     live.clearLayers();
-    drawShape(live, pts, mode, false);
+    drawShape(live, pts, mode, false, adoptSrc);
     pts.forEach((p,i) => {
       const m = L.marker(p, {icon:vIcon, draggable:true, autoPan:true}).addTo(live);
       m.on('drag', e => { pts[i] = e.target.getLatLng(); redrawLinesOnly(); });
@@ -243,76 +268,121 @@
   // 拖曳中只重畫線，不重建 marker（避免拖曳中斷）
   function redrawLinesOnly(){
     live.eachLayer(l => { if(!(l instanceof L.Marker)) live.removeLayer(l); });
-    drawShape(live, pts, mode, false); updateInfo();
+    drawShape(live, pts, mode, false, adoptSrc); updateInfo();
   }
+
+  function setHint(text, warn){ const h=$('iHint'); h.textContent=text; h.classList.toggle('warn', !!warn); }
 
   function updateInfo(){
     const box = $('info');
+    box.classList.toggle('auto', mode==='auto');
+    $('iAct').classList.toggle('show', mode==='auto' && !!cand);
     if(!mode){ box.classList.remove('show'); return; }
     box.classList.add('show');
+    $('bUndo').disabled = mode==='auto' ? !(cand && seeds.length>1) : pts.length===0;
+    if(mode==='auto'){
+      $('iMode').textContent = '🪄 自動辨識輪廓';
+      if(cand){
+        $('iBig').textContent = `${fmtNum(cand.area)} m²`;
+        $('iSub').textContent = `${fmtNum(cand.area*0.3025)} 坪 · 周長 ${fmtLen(total(cand.points,true))}`;
+        setHint(cand.warn || (cand.n>1 ? `已合併 ${cand.n} 塊。` : '') + '按「完成」保留；屋頂有板子分成好幾塊時，開「加選」逐塊點再按「方正化」', !!cand.warn);
+      } else {
+        $('iBig').textContent = '—'; $('iSub').textContent = '';
+        setHint(autoBusy ? '分析影像中…' : '點一下屋頂或空地，自動圈出同色範圍');
+      }
+      $('bDone').disabled = !cand;
+      return;
+    }
     if(mode==='dist'){
       $('iMode').textContent = '距離量測 · ' + pts.length + ' 點';
       $('iBig').textContent = fmtLen(total(pts));
       $('iSub').textContent = pts.length>=2 ? '最後一段 ' + fmtLen(map.distance(pts[pts.length-2], pts[pts.length-1])) : '';
     } else {
       const A = geoArea(pts);
-      $('iMode').textContent = '面積量測 · ' + pts.length + ' 點';
+      $('iMode').textContent = (adoptSrc==='auto' ? '🪄 自動辨識 · 微調中 · ' : '面積量測 · ') + pts.length + ' 點';
       $('iBig').textContent = pts.length>=3 ? `${fmtNum(A)} m²` : '—';
       $('iSub').textContent = pts.length>=3 ? `${fmtNum(A*0.3025)} 坪 · 周長 ${fmtLen(total(pts,true))}` : '';
     }
-    $('iHint').textContent = pts.length===0 ? '點地圖加點；可拖曳白點微調' :
-      (mode==='area' && pts.length<3 ? '至少 3 點才能算面積' : '按「完成」保留結果，可再開新量測');
-    $('bUndo').disabled = pts.length===0;
+    setHint(pts.length===0 ? '點地圖加點；可拖曳白點微調' :
+      (mode==='area' && pts.length<3 ? '至少 3 點才能算面積' : '按「完成」保留結果，可再開新量測'));
     $('bDone').disabled = mode==='dist' ? pts.length<2 : pts.length<3;
   }
 
   function setMode(m){
-    if(mode && pts.length) finish(true);
+    if((mode==='dist'||mode==='area') && pts.length) finish(true);
+    clearCand();
     mode = (mode===m) ? null : m;
-    pts = []; live.clearLayers();
+    pts = []; adoptSrc = null; live.clearLayers();
     $('bDist').classList.toggle('on', mode==='dist');
     $('bArea').classList.toggle('on', mode==='area');
-    $('bHere').disabled = !mode;
+    $('bAuto').classList.toggle('on', mode==='auto');
+    $('bHere').disabled = !(mode==='dist' || mode==='area');
     map.getContainer().style.cursor = mode ? 'crosshair' : '';
     if(!mode){ $('bUndo').disabled = true; $('bDone').disabled = true; }
     updateInfo();
-    if(mode) toast(mode==='dist' ? '點地圖開始量距離' : '點地圖圈出範圍量面積');
+    if(mode) toast({dist:'點地圖開始量距離', area:'點地圖圈出範圍量面積', auto:'點一下要辨識的屋頂或空地'}[mode]);
   }
 
   function finish(silent){
+    if(mode==='auto'){
+      if(!cand) return;
+      const it = saveDone('area', cand.points, 'auto');
+      if(!silent) toast(`已保留自動辨識：${fmtNum(cand.area)} m²（${fmtNum(cand.area*0.3025)} 坪）`, 3000);
+      clearCand(); updateInfo(); return it;
+    }
     const ok = mode==='dist' ? pts.length>=2 : pts.length>=3;
     if(ok){
-      const g = L.layerGroup().addTo(done);
-      drawShape(g, pts.slice(), mode, true);
-      saveDone(mode, pts);
+      saveDone(mode, pts, adoptSrc || 'manual');
       if(!silent){
         const msg = mode==='dist' ? '總長 '+fmtLen(total(pts))
           : `面積 ${fmtNum(geoArea(pts))} m²（${fmtNum(geoArea(pts)*0.3025)} 坪）`;
         toast('已保留：' + msg, 3000);
       }
     }
-    pts = []; live.clearLayers(); updateInfo();
+    pts = []; adoptSrc = null; live.clearLayers(); updateInfo();
   }
 
-  // 保留結果（重新整理頁面後仍在）
-  function saveDone(kind, points){
-    const arr = store.get('done', []);
-    arr.push({k:kind, p:points.map(p=>[+p.lat.toFixed(7), +p.lng.toFixed(7)])});
-    store.set('done', arr);
-  }
-  store.get('done', []).forEach(it => {
+  // ---------- 已保留的量測（重新整理後仍在；點一下可看資訊/刪除） ----------
+  let items = store.get('done', []).map((it,i) => ({id: it.id || ('o'+i+'_'+Date.now()), k:it.k, p:it.p, src: it.src || 'manual'}));
+  store.set('done', items);
+  function addDone(it){
     const g = L.layerGroup().addTo(done);
-    drawShape(g, it.p.map(a=>L.latLng(a[0],a[1])), it.k, true);
-  });
+    const shape = drawShape(g, it.p.map(a=>L.latLng(a[0],a[1])), it.k, true, it.src);
+    if(shape) shape.on('click', e => {
+      if(mode) return;                       // 量測中：讓點擊照常加點
+      L.DomEvent.stopPropagation(e);
+      const lls = it.p.map(a=>L.latLng(a[0],a[1]));
+      const tag = it.src==='auto' ? ['🪄 自動辨識', COLORS.auto] : ['✋ 手動量測', COLORS[it.k]];
+      const body = it.k==='area'
+        ? `<b>${fmtNum(geoArea(lls))} m²</b>（${fmtNum(geoArea(lls)*0.3025)} 坪）<br>周長 ${fmtLen(total(lls,true))} · ${lls.length} 點`
+        : `<b>總長 ${fmtLen(total(lls))}</b><br>${lls.length} 點`;
+      const div = document.createElement('div'); div.className = 'pop';
+      div.innerHTML = `<span class="tag" style="background:${tag[1]}">${tag[0]}</span><br>${body}<br><button>刪除這筆</button>`;
+      div.querySelector('button').onclick = () => {
+        done.removeLayer(g); items = items.filter(x => x.id !== it.id); store.set('done', items);
+        map.closePopup(); toast('已刪除');
+      };
+      L.popup({maxWidth:240}).setLatLng(e.latlng).setContent(div).openOn(map);
+    });
+  }
+  function saveDone(kind, points, src){
+    const it = {id:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), k:kind, src,
+      p:points.map(p=>[+p.lat.toFixed(7), +p.lng.toFixed(7)])};
+    items.push(it); store.set('done', items); addDone(it);
+    return it;
+  }
+  items.forEach(addDone);
 
   map.on('click', e => {
+    if(mode==='auto'){ autoDetect(e.latlng); return; }
     if(!mode) return;
     pts.push(e.latlng); redraw();
   });
 
   $('bDist').onclick = () => setMode('dist');
   $('bArea').onclick = () => setMode('area');
-  $('bUndo').onclick = () => { pts.pop(); redraw(); };
+  $('bAuto').onclick = () => setMode('auto');
+  $('bUndo').onclick = () => { if(mode==='auto'){ if(seeds.length>1){ seeds.pop(); runDetect(); } return; } pts.pop(); redraw(); };
   $('bDone').onclick = () => finish(false);
   // 清除：按兩下確認（不用 confirm()，部分內嵌瀏覽器會直接擋掉對話框）
   let clearArmed = 0;
@@ -326,8 +396,250 @@
       return;
     }
     clearArmed = 0; b.classList.remove('on'); b.lastChild.textContent = '清除';
-    done.clearLayers(); live.clearLayers(); pts = []; store.set('done', []); updateInfo();
+    done.clearLayers(); live.clearLayers(); pts = []; items = []; store.set('done', []); clearCand(); updateInfo();
     toast('已清除');
+  };
+
+  // ---------- 🪄 自動辨識：點一下，從航照影像長出同色區域並描出輪廓 ----------
+  let cand = null, candLayer = L.layerGroup().addTo(map), autoBusy = false, img = null;
+  function clearCand(){ cand = null; seeds = []; candLayer.clearLayers(); }
+
+  const S = 1024;  // 分析範圍 1024×1024 px（4×4 張圖磚）
+  function tileUrl(z,x,y){
+    return curBase==='esri'
+      ? `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
+      : `https://wmts.nlsc.gov.tw/wmts/PHOTO2/default/GoogleMapsCompatible/${z}/${y}/${x}`;
+  }
+  function loadImg(src){
+    return new Promise(res => { const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+  }
+  async function getImagery(ll){
+    const z = Math.max(17, Math.min(19, Math.round(map.getZoom()) + 1));
+    const p = map.project(ll, z);
+    const x0 = Math.floor((p.x - S/2)/256), y0 = Math.floor((p.y - S/2)/256);
+    const key = [curBase==='esri'?'esri':'nlsc', z, x0, y0].join('/');
+    if(img && img.key===key) return img;
+    const cv = document.createElement('canvas'); cv.width = S; cv.height = S;
+    const ctx = cv.getContext('2d', {willReadFrequently:true});
+    const n = S/256, jobs = [];
+    for(let ty=0; ty<n; ty++) for(let tx=0; tx<n; tx++)
+      jobs.push(loadImg(tileUrl(z, x0+tx, y0+ty)).then(im => { if(im) ctx.drawImage(im, tx*256, ty*256); }));
+    await Promise.all(jobs);
+    const raw = ctx.getImageData(0,0,S,S).data;
+    // 5×5 平均模糊，壓掉屋頂紋路/雜訊
+    const N = S*S, R = new Float32Array(N), G = new Float32Array(N), B = new Float32Array(N);
+    for(let i=0;i<N;i++){ R[i]=raw[i*4]; G[i]=raw[i*4+1]; B[i]=raw[i*4+2]; }
+    [R,G,B].forEach(ch => boxBlur(ch, S, S, 2));
+    // 邊緣強度（中央差分），屋簷、圍牆、道路邊線會是高值 → 擋住區域蔓延
+    const E = new Float32Array(N);
+    for(let y=1;y<S-1;y++) for(let x=1;x<S-1;x++){ const i=y*S+x;
+      E[i] = (Math.abs(R[i+1]-R[i-1]) + Math.abs(G[i+1]-G[i-1]) + Math.abs(B[i+1]-B[i-1])
+            + Math.abs(R[i+S]-R[i-S]) + Math.abs(G[i+S]-G[i-S]) + Math.abs(B[i+S]-B[i-S])) / 2; }
+    img = {key, z, ox:x0*256, oy:y0*256, R, G, B, E};
+    return img;
+  }
+  function boxBlur(a, W, H, r){
+    const t = new Float32Array(a.length), w = 2*r+1;
+    for(let y=0;y<H;y++){ let s=0; const o=y*W;
+      for(let x=-r;x<=r;x++) s += a[o+Math.min(W-1,Math.max(0,x))];
+      for(let x=0;x<W;x++){ t[o+x]=s/w; s += a[o+Math.min(W-1,x+r+1)] - a[o+Math.max(0,x-r)]; } }
+    for(let x=0;x<W;x++){ let s=0;
+      for(let y=-r;y<=r;y++) s += t[Math.min(H-1,Math.max(0,y))*W+x];
+      for(let y=0;y<H;y++){ a[y*W+x]=s/w; s += t[Math.min(H-1,y+r+1)*W+x] - t[Math.max(0,y-r)*W+x]; } }
+  }
+  // 方框形態學：dilate=true 膨脹、false 侵蝕
+  function morph(m, W, H, r, dilate){
+    const t = new Uint8Array(m.length), o = new Uint8Array(m.length), w = 2*r+1;
+    const pass = (src, dst, len, cnt, idx) => {
+      for(let line=0; line<cnt; line++){ let s=0;
+        for(let k=-r;k<=r;k++){ const j=k<0||k>=len?-1:idx(line,k); s += j<0?(dilate?0:1):src[j]; }
+        for(let k=0;k<len;k++){
+          dst[idx(line,k)] = dilate ? (s>0?1:0) : (s===w?1:0);
+          const a=k+r+1, b=k-r;
+          s += (a>=len?(dilate?0:1):src[idx(line,a)]) - (b<0?(dilate?0:1):src[idx(line,b)]);
+        } }
+    };
+    pass(m, t, W, H, (y,x)=>y*W+x);
+    pass(t, o, H, W, (x,y)=>y*W+x);
+    return o;
+  }
+  function flood(test, W, H, sx, sy){
+    const m = new Uint8Array(W*H), st = new Int32Array(W*H); let sp = 0;
+    const s0 = sy*W+sx; if(!test(s0)) return m;
+    m[s0]=1; st[sp++]=s0;
+    while(sp){ const i=st[--sp], x=i%W, y=(i/W)|0;
+      if(x>0   && !m[i-1] && test(i-1)){ m[i-1]=1; st[sp++]=i-1; }
+      if(x<W-1 && !m[i+1] && test(i+1)){ m[i+1]=1; st[sp++]=i+1; }
+      if(y>0   && !m[i-W] && test(i-W)){ m[i-W]=1; st[sp++]=i-W; }
+      if(y<H-1 && !m[i+W] && test(i+W)){ m[i+W]=1; st[sp++]=i+W; } }
+    return m;
+  }
+  // Moore 鄰域外框追蹤 → 像素座標多邊形
+  function trace(m, W, H){
+    let s = -1; for(let i=0;i<m.length;i++) if(m[i]){ s=i; break; }
+    if(s<0) return [];
+    const dx=[1,1,0,-1,-1,-1,0,1], dy=[0,1,1,1,0,-1,-1,-1];
+    const at=(x,y)=> x>=0&&y>=0&&x<W&&y<H&&m[y*W+x]===1;
+    const sx=s%W, sy=(s/W)|0; let cx=sx, cy=sy, b=4; const out=[[sx,sy]];
+    for(let it=0; it<W*H*2; it++){
+      let f=-1; for(let k=1;k<=8;k++){ const d=(b+k)%8; if(at(cx+dx[d],cy+dy[d])){ f=d; break; } }
+      if(f<0) break;
+      const bx=cx+dx[(f+7)%8], by=cy+dy[(f+7)%8], nx=cx+dx[f], ny=cy+dy[f];
+      for(let d=0;d<8;d++) if(dx[d]===bx-nx && dy[d]===by-ny){ b=d; break; }
+      cx=nx; cy=ny;
+      if(cx===sx && cy===sy) break;
+      out.push([cx,cy]);
+    }
+    return out;
+  }
+  function dp(P, eps){   // Douglas–Peucker（開放折線）
+    if(P.length<3) return P.slice();
+    const [ax,ay]=P[0], [bx,by]=P[P.length-1], L2=(bx-ax)**2+(by-ay)**2;
+    let md=-1, mi=0;
+    for(let i=1;i<P.length-1;i++){
+      const [px,py]=P[i];
+      const d = L2===0 ? Math.hypot(px-ax,py-ay) : Math.abs((bx-ax)*(ay-py)-(ax-px)*(by-ay))/Math.sqrt(L2);
+      if(d>md){ md=d; mi=i; }
+    }
+    if(md<=eps) return [P[0], P[P.length-1]];
+    return dp(P.slice(0,mi+1),eps).slice(0,-1).concat(dp(P.slice(mi),eps));
+  }
+  function simplifyRing(P, eps){
+    if(P.length<4) return P;
+    let far=0, fd=-1; P.forEach((p,i)=>{ const d=(p[0]-P[0][0])**2+(p[1]-P[0][1])**2; if(d>fd){fd=d; far=i;} });
+    const a = dp(P.slice(0,far+1), eps), b = dp(P.slice(far).concat([P[0]]), eps);
+    return a.slice(0,-1).concat(b.slice(0,-1));
+  }
+
+  let seeds = [], addOn = false;
+  async function autoDetect(ll){
+    if(autoBusy) return;
+    autoBusy = true; updateInfo();
+    try{
+      // 加選模式且新點落在目前分析範圍內 → 沿用同一張影像、累加種子；否則重新開始
+      let inside = false;
+      if(addOn && cand && img){
+        const p = map.project(ll, img.z);
+        inside = p.x-img.ox > 8 && p.y-img.oy > 8 && p.x-img.ox < S-8 && p.y-img.oy < S-8;
+      }
+      if(inside) seeds.push(ll);
+      else {
+        if(addOn && cand) toast('超出這次的分析範圍，改為重新辨識', 2500);
+        await getImagery(ll); clearCand(); seeds = [ll];
+      }
+      runDetect();
+    }
+    catch(err){ toast('影像讀取失敗：' + err.message, 3500); }
+    finally{ autoBusy = false; updateInfo(); }
+  }
+  // 從一個種子點長出同色區域（含開/閉運算），回傳遮罩
+  function grow(sx, sy){
+    const W=S, H=S, {R,G,B,E,z} = img;
+    let mr=0,mg=0,mb=0,c=0;      // 種子顏色 = 點擊位置 5×5 平均
+    for(let y=sy-2;y<=sy+2;y++) for(let x=sx-2;x<=sx+2;x++){ const i=y*W+x; mr+=R[i]; mg+=G[i]; mb+=B[i]; c++; }
+    mr/=c; mg/=c; mb/=c;
+    const T = +$('tol').value, T2 = T*T*3, Emax = Math.max(8, T*1.6);
+    const raw = flood(i => { const a=R[i]-mr, b=G[i]-mg, d=B[i]-mb; return a*a+b*b+d*d <= T2 && E[i] <= Emax; }, W, H, sx, sy);
+    const keepSeed = mm => mm[sy*W+sx] ? flood(i => mm[i]===1, W, H, sx, sy) : null;
+    // 開運算切斷細細的連通（沿路面滲出去），再閉運算補小縫，只留跟點擊處相連的那塊
+    const r = z>=19 ? 3 : 2;
+    let m = keepSeed(morph(morph(raw,W,H,2,false),W,H,2,true)) || raw;
+    m = morph(morph(m,W,H,r,true),W,H,r,false);
+    m[sy*W+sx] = 1;
+    return flood(i => m[i]===1, W, H, sx, sy);
+  }
+  function runDetect(){
+    if(!img || !seeds.length) return;
+    const W=S, H=S, {z,ox,oy} = img;
+    const sp0 = seeds.map(ll => { const p = map.project(ll, z); return [Math.round(p.x-ox), Math.round(p.y-oy)]; })
+      .filter(([x,y]) => x>=3 && y>=3 && x<W-3 && y<H-3);
+    if(!sp0.length) return;
+    let m = grow(...sp0[0]);
+    for(let k=1;k<sp0.length;k++){ const g = grow(...sp0[k]); for(let i=0;i<m.length;i++) if(g[i]) m[i]=1; }
+    let joined = true;
+    if(sp0.length>1){
+      // 多塊合併：用較大的閉運算把走道/間隙接起來
+      const rr = z>=19 ? 9 : 5;
+      m = morph(morph(m,W,H,rr,true),W,H,rr,false);
+      const f = flood(i => m[i]===1, W, H, sp0[0][0], sp0[0][1]);
+      joined = sp0.every(([x,y]) => f[y*W+x]);
+      if(joined) m = f;
+    }
+    // 內部孔洞（屋頂上的板子、設備）補滿
+    const outside = new Uint8Array(W*H), st = new Int32Array(W*H); let sp=0;
+    const push = i => { if(!m[i] && !outside[i]){ outside[i]=1; st[sp++]=i; } };
+    for(let x=0;x<W;x++){ push(x); push((H-1)*W+x); }
+    for(let y=0;y<H;y++){ push(y*W); push(y*W+W-1); }
+    while(sp){ const i=st[--sp], x=i%W, y=(i/W)|0;
+      if(x>0) push(i-1); if(x<W-1) push(i+1); if(y>0) push(i-W); if(y<H-1) push(i+W); }
+    let px=0, edge=false;
+    for(let i=0;i<W*H;i++){ if(!outside[i]){ m[i]=1; px++; } }
+    for(let x=0;x<W && !edge;x++) if(m[x]||m[(H-1)*W+x]) edge=true;
+    for(let y=0;y<H && !edge;y++) if(m[y*W]||m[y*W+W-1]) edge=true;
+    if(px < 60){ toast('範圍太小，試著調高容差或點在屋頂中央', 3000); return; }
+    let ring;
+    if(joined){
+      ring = simplifyRing(trace(m,W,H), z>=19 ? 3.5 : 2.5);
+    } else {
+      // 幾塊連不起來 → 用外框把全部包起來
+      const all = []; for(let i=0;i<m.length;i+=1) if(m[i]){ const x=i%W, y=(i/W)|0;
+        if(!m[i-1]||!m[i+1]||!m[i-W]||!m[i+W]) all.push([x,y]); }
+      ring = hull(all);
+    }
+    if(ring.length<3){ toast('沒抓到明確輪廓，請調整容差', 3000); return; }
+    if(rectOn) ring = minRect(ring);
+    const points = ring.map(([x,y]) => map.unproject(L.point(ox+x+0.5, oy+y+0.5), z));
+    const warn = edge ? '⚠ 範圍溢出分析區（可能吃到路面/鄰地），請調低容差或放大地圖'
+      : (!joined ? '幾塊之間距離較遠，已用外框連起來' : '');
+    cand = {points, area: geoArea(points), warn, n: sp0.length};
+    drawCand();
+  }
+  function drawCand(){
+    if(!cand) return;
+    const points = cand.points;
+    candLayer.clearLayers();
+    drawShape(candLayer, points, 'area', false, 'auto');
+    seeds.forEach(s => L.circleMarker(s, {radius:5, color:'#fff', weight:2, fillColor:COLORS.auto, fillOpacity:1, interactive:false}).addTo(candLayer));
+    updateInfo();
+  }
+  // 方正化：凸包 → 最小面積外接矩形（旋轉卡尺），適合廠房屋頂/方正空地
+  let rectOn = false;
+  function hull(P){
+    const p = P.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    const cr = (o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+    const lo=[], up=[];
+    for(const q of p){ while(lo.length>=2 && cr(lo[lo.length-2],lo[lo.length-1],q)<=0) lo.pop(); lo.push(q); }
+    for(const q of p.reverse()){ while(up.length>=2 && cr(up[up.length-2],up[up.length-1],q)<=0) up.pop(); up.push(q); }
+    return lo.slice(0,-1).concat(up.slice(0,-1));
+  }
+  function minRect(P){
+    const H = hull(P); if(H.length<3) return P;
+    let best = null;
+    for(let i=0;i<H.length;i++){
+      const a=H[i], b=H[(i+1)%H.length], L0=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!L0) continue;
+      const ux=(b[0]-a[0])/L0, uy=(b[1]-a[1])/L0;
+      let u0=1e9,u1=-1e9,v0=1e9,v1=-1e9;
+      for(const q of H){ const u=q[0]*ux+q[1]*uy, v=-q[0]*uy+q[1]*ux;
+        u0=Math.min(u0,u); u1=Math.max(u1,u); v0=Math.min(v0,v); v1=Math.max(v1,v); }
+      const A=(u1-u0)*(v1-v0);
+      if(!best || A<best.A) best={A,ux,uy,u0,u1,v0,v1};
+    }
+    const {ux,uy,u0,u1,v0,v1} = best, pt=(u,v)=>[u*ux - v*uy, u*uy + v*ux];
+    return [pt(u0,v0), pt(u1,v0), pt(u1,v1), pt(u0,v1)];
+  }
+  $('bAdd').onclick = () => { addOn = !addOn; $('bAdd').style.background = addOn ? '#a855f7' : ''; toast(addOn ? '加選：再點其他區塊會合併進來' : '已關閉加選，下次點擊重新辨識'); };
+  $('bRect').onclick = () => { rectOn = !rectOn; $('bRect').style.background = rectOn ? '#a855f7' : ''; runDetect(); };
+
+  let tolTimer = null;
+  $('tol').oninput = e => { $('tolV').textContent = e.target.value;
+    clearTimeout(tolTimer); tolTimer = setTimeout(runDetect, 120); };
+  // 自動辨識結果 → 轉成可拖點的面積量測，修完按「完成」
+  $('bAdopt').onclick = () => {
+    if(!cand) return;
+    const P = cand.points.slice();
+    setMode('area'); pts = P; adoptSrc = 'auto'; redraw();
+    toast('拖曳白點修正邊界，修好按「完成」');
   };
 
   // ---------- GPS 定位 ----------
