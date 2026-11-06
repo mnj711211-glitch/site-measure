@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>現勘量測工具</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:rgba(15,23,42,.92); --text:#f1f5f9; --muted:#94a3b8;
+    --accent:#f59e0b; --accent2:#38bdf8; --danger:#ef4444; --ok:#22c55e; --line:rgba(255,255,255,.12);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"Segoe UI","Noto Sans TC","Microsoft JhengHei",sans-serif}
+  #map{position:fixed;inset:0}
+  .leaflet-container{background:#1e293b}
+
+  /* 上方：圖層 */
+  #top{position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;right:8px;z-index:1000;
+    display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+  .chip{pointer-events:auto;background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:999px;padding:7px 12px;font-size:13px;cursor:pointer;backdrop-filter:blur(6px)}
+  .chip.on{background:var(--accent2);color:#0f172a;border-color:var(--accent2);font-weight:700}
+  .chip.ov.on{background:#a78bfa;border-color:#a78bfa}
+
+  /* 結果面板 */
+  #info{position:fixed;left:8px;right:8px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:1000;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;
+    backdrop-filter:blur(6px);display:none}
+  #info.show{display:block}
+  #info .mode{font-size:12px;color:var(--muted)}
+  #info .big{font-size:26px;font-weight:800;color:var(--accent);line-height:1.2;margin-top:2px}
+  #info .sub{font-size:13px;color:var(--text);margin-top:2px}
+  #info .hint{font-size:12px;color:var(--muted);margin-top:4px}
+
+  /* 下方工具列 */
+  #bar{position:fixed;left:0;right:0;bottom:0;z-index:1000;background:var(--panel);
+    border-top:1px solid var(--line);padding:8px 6px calc(8px + env(safe-area-inset-bottom));
+    display:flex;gap:4px;justify-content:space-around;backdrop-filter:blur(6px)}
+  .btn{flex:1;min-width:0;background:transparent;border:0;color:var(--text);padding:6px 2px;border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;cursor:pointer}
+  .btn .ic{font-size:21px;line-height:1}
+  .btn.on{background:rgba(245,158,11,.18);color:var(--accent)}
+  .btn:disabled{opacity:.35}
+  .btn.loc.tracking{color:var(--accent2)}
+
+  /* 地圖標籤 */
+  .seg-label{background:rgba(15,23,42,.85);color:#fff;border:0;border-radius:6px;padding:2px 6px;
+    font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .seg-label::before{display:none}
+  .area-label{background:rgba(245,158,11,.95);color:#111;font-size:13px}
+  .vtx{width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid var(--accent);
+    box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  .me{width:18px;height:18px;border-radius:50%;background:var(--accent2);border:3px solid #fff;
+    box-shadow:0 0 0 2px rgba(56,189,248,.4),0 0 12px rgba(56,189,248,.8)}
+  .cross{position:fixed;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;z-index:900;
+    pointer-events:none;display:none}
+  .cross.show{display:block}
+  .cross::before,.cross::after{content:"";position:absolute;background:var(--accent);box-shadow:0 0 2px #000}
+  .cross::before{left:13px;top:0;width:2px;height:28px}
+  .cross::after{top:13px;left:0;height:2px;width:28px}
+
+  #toast{position:fixed;top:calc(56px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+    z-index:1100;background:#111827;color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;
+    opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
+  #toast.show{opacity:1}
+  .leaflet-control-scale-line{background:rgba(255,255,255,.85);font-weight:600}
+  .leaflet-bottom.leaflet-left{bottom:calc(76px + env(safe-area-inset-bottom))}
+  .leaflet-bottom.leaflet-right{bottom:calc(76px + env(safe-area-inset-bottom))}
+  .leaflet-control-attribution{font-size:9px}
+  .leaflet-top.leaflet-right{margin-top:calc(88px + env(safe-area-inset-top))}
+
+  /* ---------- 手機橫式：工具列改到右側直排，結果縮成左下小卡 ---------- */
+  @media (orientation:landscape) and (max-height:540px){
+    #top{left:calc(8px + env(safe-area-inset-left));right:calc(80px + env(safe-area-inset-right));top:calc(6px + env(safe-area-inset-top))}
+    .chip{padding:6px 11px;font-size:12px}
+    #bar{left:auto;top:0;right:0;bottom:0;width:calc(70px + env(safe-area-inset-right));
+      flex-direction:column;justify-content:space-around;gap:2px;border-top:0;border-left:1px solid var(--line);
+      padding:calc(4px + env(safe-area-inset-top)) calc(4px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) 4px}
+    .btn{flex:1;padding:1px 2px;font-size:10px;gap:1px;justify-content:center}
+    .btn .ic{font-size:18px}
+    #info{left:calc(8px + env(safe-area-inset-left));right:auto;width:240px;bottom:calc(8px + env(safe-area-inset-bottom));padding:7px 12px}
+    #info .big{font-size:21px}
+    #info .hint{display:none}
+    .leaflet-right{right:calc(70px + env(safe-area-inset-right))}
+    .leaflet-top.leaflet-right{margin-top:calc(44px + env(safe-area-inset-top))}
+    .leaflet-bottom.leaflet-right{bottom:0}
+    .leaflet-bottom.leaflet-left{bottom:calc(4px + env(safe-area-inset-bottom));left:calc(256px + env(safe-area-inset-left))}
+    #toast{top:calc(46px + env(safe-area-inset-top))}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="cross" id="cross"></div>
+
+<div id="top">
+  <button class="chip on" data-base="photo">正射影像</button>
+  <button class="chip" data-base="emap">電子地圖</button>
+  <button class="chip" data-base="esri">Esri 衛星</button>
+  <button class="chip ov" data-ov="road">道路地名</button>
+  <button class="chip ov" data-ov="sect">地段</button>
+</div>
+
+<div id="info">
+  <div class="mode" id="iMode"></div>
+  <div class="big" id="iBig"></div>
+  <div class="sub" id="iSub"></div>
+  <div class="hint" id="iHint"></div>
+</div>
+
+<div id="bar">
+  <button class="btn loc" id="bLoc"><span class="ic">📍</span>定位</button>
+  <button class="btn" id="bDist"><span class="ic">📏</span>距離</button>
+  <button class="btn" id="bArea"><span class="ic">⬠</span>面積</button>
+  <button class="btn" id="bHere" disabled><span class="ic">🚶</span>加我位置</button>
+  <button class="btn" id="bUndo" disabled><span class="ic">↶</span>復原</button>
+  <button class="btn" id="bDone" disabled><span class="ic">✔</span>完成</button>
+  <button class="btn" id="bClear"><span class="ic">🗑</span>清除</button>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+  // ---------- 地圖與圖層 ----------
+  const NLSC = l => `https://wmts.nlsc.gov.tw/wmts/${l}/default/GoogleMapsCompatible/{z}/{y}/{x}`;
+  const nlscAttr = '&copy; <a href="https://maps.nlsc.gov.tw/" target="_blank">內政部國土測繪中心</a>';
+  const bases = {
+    photo: L.tileLayer(NLSC('PHOTO2'), {maxZoom:21, maxNativeZoom:20, attribution:nlscAttr}),
+    emap:  L.tileLayer(NLSC('EMAP'),   {maxZoom:21, maxNativeZoom:20, attribution:nlscAttr}),
+    esri:  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+             {maxZoom:21, maxNativeZoom:19, attribution:'Esri World Imagery'})
+  };
+  const overlays = {
+    road: L.tileLayer(NLSC('EMAP2'),    {maxZoom:21, maxNativeZoom:20}),
+    sect: L.tileLayer(NLSC('LANDSECT'), {maxZoom:21, maxNativeZoom:20, opacity:.9})
+  };
+
+  const store = {
+    get(k,d){ try{ const v = localStorage.getItem('sm_'+k); return v==null?d:JSON.parse(v);}catch(e){return d;} },
+    set(k,v){ try{ localStorage.setItem('sm_'+k, JSON.stringify(v)); }catch(e){} }
+  };
+  const view = store.get('view', {c:[23.7,120.95], z:8});
+  const map = L.map('map', {zoomControl:false, attributionControl:true, tap:true}).setView(view.c, view.z);
+  L.control.zoom({position:'topright'}).addTo(map);
+  L.control.scale({imperial:false, position:'bottomleft'}).addTo(map);
+  map.on('moveend', ()=> store.set('view', {c:[map.getCenter().lat, map.getCenter().lng], z:map.getZoom()}));
+  // 手機轉向時重新計算地圖尺寸
+  window.addEventListener('orientationchange', () => setTimeout(() => map.invalidateSize(), 300));
+
+  let curBase = store.get('base','photo'); if(!bases[curBase]) curBase='photo';
+  bases[curBase].addTo(map);
+  const ovOn = store.get('ov', {road:false, sect:false});
+  Object.keys(ovOn).forEach(k => { if(ovOn[k] && overlays[k]) overlays[k].addTo(map); });
+
+  function syncChips(){
+    document.querySelectorAll('[data-base]').forEach(b => b.classList.toggle('on', b.dataset.base===curBase));
+    document.querySelectorAll('[data-ov]').forEach(b => b.classList.toggle('on', !!ovOn[b.dataset.ov]));
+  }
+  syncChips();
+  document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => {
+    map.removeLayer(bases[curBase]); curBase = b.dataset.base; bases[curBase].addTo(map); bases[curBase].bringToBack();
+    store.set('base', curBase); syncChips();
+  });
+  document.querySelectorAll('[data-ov]').forEach(b => b.onclick = () => {
+    const k = b.dataset.ov; ovOn[k] = !ovOn[k];
+    ovOn[k] ? overlays[k].addTo(map) : map.removeLayer(overlays[k]);
+    store.set('ov', ovOn); syncChips();
+  });
+
+  // ---------- 工具 ----------
+  const $ = id => document.getElementById(id);
+  const toast = (msg, ms=2200) => { const t=$('toast'); t.textContent=msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'), ms); };
+  const fmtLen = m => m >= 1000 ? (m/1000).toFixed(3)+' km' : (m<100 ? m.toFixed(2) : m.toFixed(1))+' m';
+  const fmtNum = (n,d=1) => n.toLocaleString('zh-TW',{minimumFractionDigits:d, maximumFractionDigits:d});
+  // 球面多邊形面積（m²），同 Leaflet.draw geodesicArea
+  function geoArea(lls){
+    const R = 6378137, d2r = Math.PI/180; let a = 0, n = lls.length;
+    if(n<3) return 0;
+    for(let i=0;i<n;i++){
+      const p1 = lls[i], p2 = lls[(i+1)%n];
+      a += ((p2.lng - p1.lng)*d2r) * (2 + Math.sin(p1.lat*d2r) + Math.sin(p2.lat*d2r));
+    }
+    return Math.abs(a * R * R / 2);
+  }
+  const mid = (a,b) => L.latLng((a.lat+b.lat)/2, (a.lng+b.lng)/2);
+
+  // ---------- 量測狀態 ----------
+  const done = L.layerGroup().addTo(map);   // 已完成的量測
+  let mode = null;            // 'dist' | 'area' | null
+  let pts = [];               // 目前量測的點
+  let live = L.layerGroup().addTo(map);
+
+  const vIcon = L.divIcon({className:'', html:'<div class="vtx"></div>', iconSize:[14,14], iconAnchor:[7,7]});
+
+  function drawShape(group, points, kind, final){
+    const color = kind==='area' ? '#f59e0b' : '#38bdf8';
+    if(kind==='area' && points.length>=3){
+      L.polygon(points, {color, weight:3, fillColor:color, fillOpacity:.22}).addTo(group);
+    } else if(points.length>=2){
+      L.polyline(points, {color, weight:4}).addTo(group);
+    }
+    // 各段長度
+    const segs = kind==='area' && points.length>=3 ? points.length : points.length-1;
+    for(let i=0;i<segs;i++){
+      const a = points[i], b = points[(i+1)%points.length];
+      const d = map.distance(a,b);
+      L.tooltip({permanent:true, direction:'center', className:'seg-label'})
+        .setLatLng(mid(a,b)).setContent(fmtLen(d)).addTo(group);
+    }
+    if(final && kind==='area' && points.length>=3){
+      const A = geoArea(points);
+      const c = L.polygon(points).getBounds().getCenter();
+      L.tooltip({permanent:true, direction:'center', className:'seg-label area-label'})
+        .setLatLng(c).setContent(`${fmtNum(A)} m²<br>${fmtNum(A*0.3025)} 坪`).addTo(group);
+    }
+    if(final && kind==='dist' && points.length>=2){
+      L.tooltip({permanent:true, direction:'right', offset:[10,0], className:'seg-label area-label'})
+        .setLatLng(points[points.length-1]).setContent('總長 '+fmtLen(total(points))).addTo(group);
+    }
+  }
+  function total(points, closed){
+    let s=0; for(let i=1;i<points.length;i++) s+=map.distance(points[i-1],points[i]);
+    if(closed && points.length>=3) s+=map.distance(points[points.length-1], points[0]);
+    return s;
+  }
+
+  function redraw(){
+    live.clearLayers();
+    drawShape(live, pts, mode, false);
+    pts.forEach((p,i) => {
+      const m = L.marker(p, {icon:vIcon, draggable:true, autoPan:true}).addTo(live);
+      m.on('drag', e => { pts[i] = e.target.getLatLng(); redrawLinesOnly(); });
+      m.on('dragend', redraw);
+    });
+    updateInfo();
+  }
+  // 拖曳中只重畫線，不重建 marker（避免拖曳中斷）
+  function redrawLinesOnly(){
+    live.eachLayer(l => { if(!(l instanceof L.Marker)) live.removeLayer(l); });
+    drawShape(live, pts, mode, false); updateInfo();
+  }
+
+  function updateInfo(){
+    const box = $('info');
+    if(!mode){ box.classList.remove('show'); return; }
+    box.classList.add('show');
+    if(mode==='dist'){
+      $('iMode').textContent = '距離量測 · ' + pts.length + ' 點';
+      $('iBig').textContent = fmtLen(total(pts));
+      $('iSub').textContent = pts.length>=2 ? '最後一段 ' + fmtLen(map.distance(pts[pts.length-2], pts[pts.length-1])) : '';
+    } else {
+      const A = geoArea(pts);
+      $('iMode').textContent = '面積量測 · ' + pts.length + ' 點';
+      $('iBig').textContent = pts.length>=3 ? `${fmtNum(A)} m²` : '—';
+      $('iSub').textContent = pts.length>=3 ? `${fmtNum(A*0.3025)} 坪 · 周長 ${fmtLen(total(pts,true))}` : '';
+    }
+    $('iHint').textContent = pts.length===0 ? '點地圖加點；可拖曳白點微調' :
+      (mode==='area' && pts.length<3 ? '至少 3 點才能算面積' : '按「完成」保留結果，可再開新量測');
+    $('bUndo').disabled = pts.length===0;
+    $('bDone').disabled = mode==='dist' ? pts.length<2 : pts.length<3;
+  }
+
+  function setMode(m){
+    if(mode && pts.length) finish(true);
+    mode = (mode===m) ? null : m;
+    pts = []; live.clearLayers();
+    $('bDist').classList.toggle('on', mode==='dist');
+    $('bArea').classList.toggle('on', mode==='area');
+    $('bHere').disabled = !mode;
+    map.getContainer().style.cursor = mode ? 'crosshair' : '';
+    if(!mode){ $('bUndo').disabled = true; $('bDone').disabled = true; }
+    updateInfo();
+    if(mode) toast(mode==='dist' ? '點地圖開始量距離' : '點地圖圈出範圍量面積');
+  }
+
+  function finish(silent){
+    const ok = mode==='dist' ? pts.length>=2 : pts.length>=3;
+    if(ok){
+      const g = L.layerGroup().addTo(done);
+      drawShape(g, pts.slice(), mode, true);
+      saveDone(mode, pts);
+      if(!silent){
+        const msg = mode==='dist' ? '總長 '+fmtLen(total(pts))
+          : `面積 ${fmtNum(geoArea(pts))} m²（${fmtNum(geoArea(pts)*0.3025)} 坪）`;
+        toast('已保留：' + msg, 3000);
+      }
+    }
+    pts = []; live.clearLayers(); updateInfo();
+  }
+
+  // 保留結果（重新整理頁面後仍在）
+  function saveDone(kind, points){
+    const arr = store.get('done', []);
+    arr.push({k:kind, p:points.map(p=>[+p.lat.toFixed(7), +p.lng.toFixed(7)])});
+    store.set('done', arr);
+  }
+  store.get('done', []).forEach(it => {
+    const g = L.layerGroup().addTo(done);
+    drawShape(g, it.p.map(a=>L.latLng(a[0],a[1])), it.k, true);
+  });
+
+  map.on('click', e => {
+    if(!mode) return;
+    pts.push(e.latlng); redraw();
+  });
+
+  $('bDist').onclick = () => setMode('dist');
+  $('bArea').onclick = () => setMode('area');
+  $('bUndo').onclick = () => { pts.pop(); redraw(); };
+  $('bDone').onclick = () => finish(false);
+  // 清除：按兩下確認（不用 confirm()，部分內嵌瀏覽器會直接擋掉對話框）
+  let clearArmed = 0;
+  $('bClear').onclick = () => {
+    const b = $('bClear');
+    if(Date.now() - clearArmed > 3000){
+      clearArmed = Date.now();
+      b.classList.add('on'); b.lastChild.textContent = '再按確認';
+      toast('再按一次「清除」刪除所有量測結果');
+      setTimeout(() => { if(Date.now() - clearArmed >= 3000){ b.classList.remove('on'); b.lastChild.textContent = '清除'; } }, 3050);
+      return;
+    }
+    clearArmed = 0; b.classList.remove('on'); b.lastChild.textContent = '清除';
+    done.clearLayers(); live.clearLayers(); pts = []; store.set('done', []); updateInfo();
+    toast('已清除');
+  };
+
+  // ---------- GPS 定位 ----------
+  let meMarker = null, meCircle = null, watchId = null, lastPos = null, firstFix = true;
+  const meIcon = L.divIcon({className:'', html:'<div class="me"></div>', iconSize:[18,18], iconAnchor:[9,9]});
+  function onPos(p){
+    const ll = L.latLng(p.coords.latitude, p.coords.longitude), acc = p.coords.accuracy;
+    lastPos = {ll, acc};
+    if(!meMarker){
+      meMarker = L.marker(ll, {icon:meIcon, interactive:false, zIndexOffset:1000}).addTo(map);
+      meCircle = L.circle(ll, {radius:acc, color:'#38bdf8', weight:1, fillOpacity:.12, interactive:false}).addTo(map);
+    } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
+    if(firstFix){ map.setView(ll, Math.max(map.getZoom(), 18)); firstFix = false;
+      toast(`已定位（精度約 ±${Math.round(acc)} m）`); }
+  }
+  function onErr(e){
+    const msg = {1:'未允許定位權限，請在瀏覽器設定開啟', 2:'無法取得位置（訊號不足）', 3:'定位逾時'}[e.code] || e.message;
+    toast(msg, 3500); stopTrack();
+  }
+  function stopTrack(){
+    if(watchId!=null) navigator.geolocation.clearWatch(watchId);
+    watchId = null; $('bLoc').classList.remove('tracking');
+  }
+  $('bLoc').onclick = () => {
+    if(!navigator.geolocation){ toast('此瀏覽器不支援定位'); return; }
+    if(watchId!=null && lastPos){ map.setView(lastPos.ll, Math.max(map.getZoom(), 18)); return; }
+    firstFix = true;
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:3000, timeout:15000});
+    $('bLoc').classList.add('tracking');
+    toast('定位中…');
+  };
+  // 長按定位鈕 = 停止追蹤
+  $('bLoc').oncontextmenu = e => { e.preventDefault(); stopTrack(); toast('已停止定位'); };
+
+  // 用目前 GPS 位置加點（沿著邊界走一圈量測）
+  $('bHere').onclick = () => {
+    if(!lastPos){ toast('請先按「定位」取得 GPS 位置'); return; }
+    if(lastPos.acc > 15) toast(`注意：目前 GPS 精度 ±${Math.round(lastPos.acc)} m，誤差較大`, 3000);
+    pts.push(lastPos.ll); redraw();
+  };
+})();
+</script>
+</body>
+</html>
