@@ -80,26 +80,6 @@
     z-index:1100;background:#111827;color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;
     opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
   #toast.show{opacity:1}
-  #solar{position:fixed;left:8px;right:8px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:1001;
-    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;backdrop-filter:blur(6px);
-    display:none;max-height:58vh;overflow:auto}
-  #solar.show{display:block}
-  #solar .sh{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#fde68a}
-  #solar .sh button{background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px}
-  #solar .big{font-size:22px;font-weight:800;color:#fbbf24;margin-top:2px}
-  #solar .sub{font-size:12.5px;line-height:1.5;margin-top:2px}
-  #solar details{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
-  #solar summary{font-size:13px;color:var(--accent2);cursor:pointer}
-  #solar .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:8px}
-  #solar .grid label{font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
-  #solar .grid input,#solar .grid select{background:#0b1220;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 7px;font-size:14px;width:100%}
-  #solar .acts{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
-  #solar .acts button{border:0;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;background:#f59e0b;color:#111}
-  #solar .acts button.ghost{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:400}
-  .solar-label{background:rgba(30,58,138,.95);color:#fde68a}
-  .pop .row{display:flex;gap:6px;margin-top:8px}
-  .pop .row button{margin-top:0}
-  .pop button.sol{background:#f59e0b;color:#111;font-weight:700}
   .leaflet-control-scale-line{background:rgba(255,255,255,.85);font-weight:600}
   .leaflet-bottom.leaflet-left{bottom:calc(76px + env(safe-area-inset-bottom))}
   .leaflet-bottom.leaflet-right{bottom:calc(76px + env(safe-area-inset-bottom))}
@@ -123,7 +103,6 @@
     .leaflet-bottom.leaflet-right{bottom:0}
     .leaflet-bottom.leaflet-left{bottom:calc(4px + env(safe-area-inset-bottom));left:calc(256px + env(safe-area-inset-left))}
     #toast{top:calc(46px + env(safe-area-inset-top))}
-    #solar{left:calc(8px + env(safe-area-inset-left));right:auto;width:300px;bottom:calc(8px + env(safe-area-inset-bottom));max-height:calc(100vh - 60px)}
   }
 </style>
 </head>
@@ -162,25 +141,6 @@
   <button class="btn" id="bUndo" disabled><span class="ic">↶</span>復原</button>
   <button class="btn" id="bDone" disabled><span class="ic">✔</span>完成</button>
   <button class="btn" id="bClear"><span class="ic">🗑</span>清除</button>
-</div>
-<div id="solar">
-  <div class="sh"><span>☀ 太陽能排佈模擬</span><button id="sClose" aria-label="關閉">✕</button></div>
-  <div class="big" id="sBig">—</div>
-  <div class="sub" id="sSub"></div>
-  <details id="sSetBox"><summary>排佈設定（模組、走道、退縮）</summary>
-    <div class="grid">
-      <label>模組功率 (W)<input id="sW" type="number" inputmode="numeric" min="100" step="5"></label>
-      <label>每幾排一條走道<input id="sN" type="number" inputmode="numeric" min="1" step="1"></label>
-      <label>模組長 (mm)<input id="sL" type="number" inputmode="numeric" step="1"></label>
-      <label>模組寬 (mm)<input id="sS" type="number" inputmode="numeric" step="1"></label>
-      <label>走道寬 (m)<input id="sWalk" type="number" inputmode="decimal" min="0" step="0.1"></label>
-      <label>邊界退縮 (m)<input id="sSet" type="number" inputmode="decimal" min="0" step="0.1"></label>
-      <label>擺放<select id="sOri"><option value="P">直放（長邊前後）</option><option value="Lnd">橫放（長邊左右）</option></select></label>
-      <label>排列方向<select id="sDir"><option value="long">沿最長邊</option><option value="long90">最長邊轉 90°</option><option value="south">東西向（朝正南）</option></select></label>
-      <label>模組間隙 (cm)<input id="sGap" type="number" inputmode="decimal" min="0" step="0.5"></label>
-    </div>
-  </details>
-  <div class="acts"><button class="ghost" id="sDel">移除排佈</button><button id="sDone">完成</button></div>
 </div>
 <div id="toast"></div>
 
@@ -369,7 +329,7 @@
     if(mode==='auto'){
       if(!cand) return;
       const it = saveDone('area', cand.points, cand.src || 'auto', cand.info);
-      if(!silent) toast(`已保留：${fmtNum(cand.area)} m²（${fmtNum(cand.area*0.3025)} 坪）・點一下區塊可做太陽能排佈`, 3500);
+      if(!silent) toast(`已保留自動辨識：${fmtNum(cand.area)} m²（${fmtNum(cand.area*0.3025)} 坪）`, 3000);
       clearCand(); updateInfo(); return it;
     }
     const ok = mode==='dist' ? pts.length>=2 : pts.length>=3;
@@ -378,14 +338,14 @@
       if(!silent){
         const msg = mode==='dist' ? '總長 '+fmtLen(total(pts))
           : `面積 ${fmtNum(geoArea(pts))} m²（${fmtNum(geoArea(pts)*0.3025)} 坪）`;
-        toast('已保留：' + msg + (mode==='area' ? '・點一下區塊可做太陽能排佈' : ''), 3500);
+        toast('已保留：' + msg, 3000);
       }
     }
     pts = []; adoptSrc = null; live.clearLayers(); updateInfo();
   }
 
   // ---------- 已保留的量測（重新整理後仍在；點一下可看資訊/刪除） ----------
-  let items = store.get('done', []).map((it,i) => ({id: it.id || ('o'+i+'_'+Date.now()), k:it.k, p:it.p, src: it.src || 'manual', meta: it.meta, solar: it.solar}));
+  let items = store.get('done', []).map((it,i) => ({id: it.id || ('o'+i+'_'+Date.now()), k:it.k, p:it.p, src: it.src || 'manual', meta: it.meta}));
   store.set('done', items);
   function addDone(it){
     const g = L.layerGroup().addTo(done);
@@ -399,16 +359,13 @@
         ? `<b>${fmtNum(geoArea(lls))} m²</b>（${fmtNum(geoArea(lls)*0.3025)} 坪）<br>周長 ${fmtLen(total(lls,true))} · ${lls.length} 點`
         : `<b>總長 ${fmtLen(total(lls))}</b><br>${lls.length} 點`;
       const div = document.createElement('div'); div.className = 'pop';
-      div.innerHTML = `<span class="tag" style="background:${tag[1]}">${tag[0]}</span><br>${body}${it.meta ? '<br><small>'+it.meta.replace(/^🏢 /,'')+'</small>' : ''}<div class="row">${it.k==='area' ? '<button class="sol">☀ '+(it.solar?'調整排佈':'太陽能排佈')+'</button>' : ''}<button class="del">刪除</button></div>`;
-      if(div.querySelector('.sol')) div.querySelector('.sol').onclick = () => openSolar(it);
-      div.querySelector('.del').onclick = () => {
-        if(it.solar){ delete it.solar; drawSolar(it); }
+      div.innerHTML = `<span class="tag" style="background:${tag[1]}">${tag[0]}</span><br>${body}${it.meta ? '<br><small>'+it.meta.replace(/^🏢 /,'')+'</small>' : ''}<br><button>刪除這筆</button>`;
+      div.querySelector('button').onclick = () => {
         done.removeLayer(g); items = items.filter(x => x.id !== it.id); store.set('done', items);
         map.closePopup(); toast('已刪除');
       };
       L.popup({maxWidth:240}).setLatLng(e.latlng).setContent(div).openOn(map);
     });
-    if(it.solar) drawSolar(it);
   }
   function saveDone(kind, points, src, meta){
     const it = {id:'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), k:kind, src, meta: meta || undefined,
@@ -416,133 +373,6 @@
     items.push(it); store.set('done', items); addDone(it);
     return it;
   }
-  // ---------- ☀ 太陽能排佈：在已保留的面積上排模組、留維運走道、估容量 ----------
-  const SOLAR_DEF = {w:495, L:2094, S:1134, ori:'P', dir:'long', n:4, walk:0.6, set:1.0, gap:2, hrs:1100};
-  const solarRenderer = L.canvas({padding:0.3});
-  const solarGroup = L.layerGroup().addTo(map);
-  const solarLayers = {};        // item.id → layerGroup
-  let solarItem = null;          // 目前在設定的那一筆
-
-  function computeLayout(lls, o){
-    // 局部公尺座標（以中心點為原點的等距投影，廠區尺度誤差可忽略）
-    const lat0 = lls.reduce((s,p)=>s+p.lat,0)/lls.length, lng0 = lls.reduce((s,p)=>s+p.lng,0)/lls.length;
-    const kx = 111320*Math.cos(lat0*Math.PI/180), ky = 110540;
-    const XY = lls.map(p => [(p.lng-lng0)*kx, (p.lat-lat0)*ky]);
-    // 排的方向：沿最長邊 / 最長邊轉 90° / 東西向（模組朝正南）
-    let th = 0;
-    if(o.dir !== 'south'){
-      let best = -1;
-      XY.forEach((a,i) => { const b = XY[(i+1)%XY.length], d = Math.hypot(b[0]-a[0], b[1]-a[1]);
-        if(d > best){ best = d; th = Math.atan2(b[1]-a[1], b[0]-a[0]); } });
-      if(o.dir === 'long90') th += Math.PI/2;
-    }
-    const c = Math.cos(th), s = Math.sin(th);
-    const P = XY.map(([x,y]) => [x*c + y*s, -x*s + y*c]);          // 轉到排佈座標（列沿 x 軸）
-    const back = ([u,v]) => { const x = u*c - v*s, y = u*s + v*c; return L.latLng(lat0 + y/ky, lng0 + x/kx); };
-    const pip = (x,y) => { let ins=false; for(let i=0,j=P.length-1;i<P.length;j=i++){ const [xi,yi]=P[i],[xj,yj]=P[j];
-      if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; };
-    const fits = (x1,y1,x2,y2) => {           // 模組外擴退縮距離後，四角都在範圍內且沒有邊界頂點戳進來
-      const a=x1-o.set, b=y1-o.set, cc=x2+o.set, d=y2+o.set;
-      if(!(pip(a,b) && pip(cc,b) && pip(cc,d) && pip(a,d))) return false;
-      for(const [x,y] of P) if(x>a && x<cc && y>b && y<d) return false;
-      return true;
-    };
-    const mw = (o.ori==='P' ? o.S : o.L)/1000, md = (o.ori==='P' ? o.L : o.S)/1000;   // 沿列寬、列深
-    const gap = o.gap/100, n = Math.max(1, o.n|0), walk = o.walk;
-    let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
-    P.forEach(([x,y]) => { minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y); });
-    let best = null;
-    // 試幾種起始位移，取片數最多的
-    for(const fy of [0, .25, .5, .75]) for(const fx of [0, .33, .66]){
-      const mods = [], rows = []; let y = minY + o.set + fy*(md+gap), r = 0;
-      while(y + md <= maxY - o.set + 1e-6){
-        const row = [];
-        for(let x = minX + o.set + fx*(mw+gap); x + mw <= maxX - o.set + 1e-6; x += mw + gap)
-          if(fits(x, y, x+mw, y+md)) row.push([x, y, x+mw, y+md]);
-        rows.push({y, d:md, mods:row}); mods.push(...row);
-        y += md; r++;
-        y += (r % n === 0) ? walk : gap;
-      }
-      if(!best || mods.length > best.mods.length) best = {mods, rows};
-    }
-    // 維運走道位置（每 n 排之後），畫在相鄰兩排之間
-    const walks = [];
-    best.rows.forEach((row, i) => {
-      if((i+1) % n !== 0 || i === best.rows.length-1) return;
-      const nb = best.rows[i+1], all = row.mods.concat(nb.mods); if(!all.length || !row.mods.length || !nb.mods.length) return;
-      const x1 = Math.min(...all.map(m=>m[0])), x2 = Math.max(...all.map(m=>m[2])), yy = row.y + row.d + walk/2;
-      walks.push([back([x1,yy]), back([x2,yy])]);
-    });
-    const usedRows = best.rows.filter(r => r.mods.length).length;
-    return {count: best.mods.length, rows: usedRows, walks,
-      polys: best.mods.map(([x1,y1,x2,y2]) => [back([x1,y1]), back([x2,y1]), back([x2,y2]), back([x1,y2])])};
-  }
-
-  function drawSolar(it){
-    if(solarLayers[it.id]){ solarGroup.removeLayer(solarLayers[it.id]); delete solarLayers[it.id]; }
-    if(!it.solar) return null;
-    const lls = it.p.map(a=>L.latLng(a[0],a[1]));
-    const o = {...SOLAR_DEF, ...it.solar}, res = computeLayout(lls, o);
-    const g = L.layerGroup();
-    res.polys.forEach(q => L.polygon(q, {renderer:solarRenderer, color:'#93c5fd', weight:.6, fillColor:'#1e3a8a', fillOpacity:.85, interactive:false}).addTo(g));
-    res.walks.forEach(w => L.polyline(w, {renderer:solarRenderer, color:'#facc15', weight:2, dashArray:'6 4', interactive:false}).addTo(g));
-    const kwp = res.count*o.w/1000;
-    if(res.count){
-      const c = L.polygon(lls).getBounds().getCenter();
-      L.tooltip({permanent:true, direction:'center', className:'seg-label solar-label', offset:[0,30]})
-        .setLatLng(c).setContent(`☀ ${res.count.toLocaleString()} 片 · ${fmtNum(kwp,2)} kWp`).addTo(g);
-    }
-    g.addTo(solarGroup); solarLayers[it.id] = g;
-    return {...res, kwp, o, area: geoArea(lls)};
-  }
-
-  const sIds = ['sW','sL','sS','sOri','sDir','sN','sWalk','sSet','sGap'];
-  const sKey = {sW:'w', sL:'L', sS:'S', sOri:'ori', sDir:'dir', sN:'n', sWalk:'walk', sSet:'set', sGap:'gap'};
-  function openSolar(it){
-    map.closePopup();
-    if(mode) setMode(mode);   // 結束量測模式
-    solarItem = it;
-    const o = {...SOLAR_DEF, ...store.get('solarDef', {}), ...(it.solar||{})};
-    sIds.forEach(id => $(id).value = o[sKey[id]]);
-    it.solar = readSolar();
-    $('info').classList.remove('show'); $('solar').classList.add('show');
-    refreshSolar();
-    // 縮放到這塊，並避開排佈面板（直式在下方、橫式在左側）
-    const land = matchMedia('(orientation:landscape) and (max-height:540px)').matches, pr = $('solar').getBoundingClientRect();
-    map.fitBounds(L.polygon(it.p).getBounds(), land
-      ? {paddingTopLeft:[pr.right + 16, 50], paddingBottomRight:[90, 16], maxZoom:20}
-      : {paddingTopLeft:[20, 100], paddingBottomRight:[20, innerHeight - pr.top + 16], maxZoom:20});
-  }
-  function readSolar(){
-    const o = {};
-    sIds.forEach(id => { const v = $(id).value; o[sKey[id]] = (id==='sOri'||id==='sDir') ? v : Math.max(0, parseFloat(v)||0); });
-    if(o.L < 300) o.L = SOLAR_DEF.L; if(o.S < 300) o.S = SOLAR_DEF.S; if(o.n < 1) o.n = 1; if(!o.w) o.w = SOLAR_DEF.w;
-    return o;
-  }
-  function refreshSolar(){
-    if(!solarItem) return;
-    const r = drawSolar(solarItem);
-    $('sBig').textContent = r.count ? `${r.count.toLocaleString()} 片 · ${fmtNum(r.kwp,2)} kWp` : '排不下任何模組';
-    const modA = r.count * (r.o.L/1000) * (r.o.S/1000);
-    $('sSub').innerHTML = r.count
-      ? `${r.rows} 排 · 維運走道 ${r.walks.length} 條（每 ${r.o.n} 排一條，寬 ${r.o.walk} m）<br>` +
-        `模組覆蓋 ${fmtNum(modA,0)} m² / 範圍 ${fmtNum(r.area,0)} m²（${fmtNum(modA/r.area*100,0)}%）<br>` +
-        `粗估年發電 ≈ ${fmtNum(r.kwp*r.o.hrs/10000,1)} 萬度（以每 kWp 年發 ${r.o.hrs.toLocaleString()} 度計）`
-      : '試著減少退縮距離、改直放/橫放或換方向';
-  }
-  sIds.forEach(id => { $(id).addEventListener('input', () => {
-    if(!solarItem) return;
-    solarItem.solar = readSolar(); clearTimeout(refreshSolar._t); refreshSolar._t = setTimeout(refreshSolar, 150);
-  }); });
-  $('sClose').onclick = $('sDone').onclick = () => {
-    if(solarItem){ solarItem.solar = readSolar(); store.set('solarDef', solarItem.solar); store.set('done', items); toast('排佈已保留，點區塊可再調整'); }
-    solarItem = null; $('solar').classList.remove('show');
-  };
-  $('sDel').onclick = () => {
-    if(solarItem){ delete solarItem.solar; drawSolar(solarItem); store.set('done', items); toast('已移除排佈'); }
-    solarItem = null; $('solar').classList.remove('show');
-  };
-
   items.forEach(addDone);
 
   map.on('click', e => {
@@ -568,7 +398,7 @@
       return;
     }
     clearArmed = 0; b.classList.remove('on'); b.lastChild.textContent = '清除';
-    done.clearLayers(); solarGroup.clearLayers(); Object.keys(solarLayers).forEach(k=>delete solarLayers[k]); live.clearLayers(); pts = []; items = []; store.set('done', []); clearCand(); updateInfo();
+    done.clearLayers(); live.clearLayers(); pts = []; items = []; store.set('done', []); clearCand(); updateInfo();
     toast('已清除');
   };
 
